@@ -1,71 +1,124 @@
-# uv-debug-scripts README
+# UV Debug Scripts
 
-This is the README for your extension "uv-debug-scripts". After writing up a brief description, we recommend including the following sections.
+Zero-friction debugging for `uv` entry points in VS Code.
 
-## Features
+If your `pyproject.toml` contains:
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+```toml
+[project.scripts]
+mytool = "my_pkg.cli:main"
+```
 
-For example if there is an image subfolder under your extension project workspace:
+This extension lets you:
 
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
-
-## Requirements
-
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
-
-## Extension Settings
-
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
+* Click → pick script → debug
+* One-click re-run last script
+* No `launch.json`
+* No “active file?” prompts
+* No manual debug configuration
 
 ---
 
-## Following extension guidelines
+## Why This Exists
 
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
+When working with `uv` projects, debugging a script usually requires:
 
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
+* Creating a debug configuration
+* Selecting the interpreter
+* Manually mapping entry points
+* Repeating the ritual every time
 
-## Working with Markdown
+This extension removes that ceremony.
 
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
+It reads `pyproject.toml`, resolves your entry point, and launches a debug session automatically using your project’s `.venv`.
 
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
+---
 
-## For more information
+## Features
 
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
+### 🔹 Pick and Debug
 
-**Enjoy!**
+Command: **UV: Debug Script**
+
+* Parses `[project.scripts]` and `[project.gui-scripts]`
+* Lets you choose one
+* Prompts for optional arguments
+* Starts a Python debug session
+
+---
+
+### 🔹 One-Click Debug Last Script
+
+Status bar button:
+
+```
+uv: <last-script>
+```
+
+Click to immediately re-run your last debug session.
+
+If previous args were empty → runs instantly.
+If args were provided → lets you edit them.
+
+---
+
+### 🔹 Smart Interpreter Detection
+
+Automatically prefers:
+
+```
+.venv/bin/python      (macOS/Linux)
+.venv/Scripts/python.exe  (Windows)
+```
+
+Falls back to VS Code Python extension if needed.
+
+---
+
+### 🔹 Auto Refresh
+
+Changes to `pyproject.toml` are detected automatically.
+New or removed scripts appear without restarting VS Code.
+
+---
+
+## Requirements
+
+* A workspace containing `pyproject.toml`
+* Python extension (`ms-python.python`)
+* A `.venv` created by `uv`
+
+---
+
+## Installation (VSIX)
+
+```bash
+code --install-extension uv-debug-scripts-<version>.vsix
+```
+
+---
+
+## Philosophy
+
+This extension is intentionally minimal.
+
+It exists to eliminate debugging friction — not to introduce new configuration surfaces.
+
+If something feels repetitive, it should be automated.
+If something feels noisy, it should be removed.
+
+---
+
+## Roadmap
+
+* Optional CodeLens support
+* Multi-root workspace support
+* Improved argument parsing
+* Environment parity with `uv run`
+
+---
+
+## License
+
+MIT
+

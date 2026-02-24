@@ -7,6 +7,11 @@
   "engines": {
     "vscode": "^1.85.0"
   },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kkibria/uv-debug-scripts"
+  },
   "categories": [
     "Debuggers",
     "Programming Languages"
@@ -14,7 +19,8 @@
   "activationEvents": [
     "workspaceContains:pyproject.toml",
     "onCommand:uvDebugScripts.debugScript",
-    "onCommand:uvDebugScripts.debugLastScript"
+    "onCommand:uvDebugScripts.debugLastScript",
+    "onCommand:uvDebugScripts.debugLastScriptEditArgs"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -26,6 +32,10 @@
       {
         "command": "uvDebugScripts.debugLastScript",
         "title": "UV: Debug Last Script"
+      },
+      {
+        "command": "uvDebugScripts.debugLastScriptEditArgs",
+        "title": "UV: Debug Last Script (Edit Args)"
       }
     ],
     "keybindings": [
@@ -33,6 +43,12 @@
         "command": "uvDebugScripts.debugLastScript",
         "key": "ctrl+shift+enter",
         "mac": "cmd+shift+enter",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "uvDebugScripts.debugLastScriptEditArgs",
+        "key": "ctrl+shift+alt+enter",
+        "mac": "cmd+shift+alt+enter",
         "when": "editorTextFocus"
       }
     ]

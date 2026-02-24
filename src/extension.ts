@@ -125,7 +125,7 @@ async function resolvePythonPath(workspaceFolder: string): Promise<string | unde
     : path.join(workspaceFolder, ".venv", "bin", "python");
 
   if (await fileExists(candidate)) return candidate;
-  return undefined; // let Python extension / VS Code decide
+  return undefined; // let VS Code / Python extension decide
 }
 
 async function startDebug(
@@ -145,6 +145,8 @@ async function startDebug(
     args: parseArgs(argsLine),
     console: "integratedTerminal",
     justMyCode: true,
+    cwd: root,
+    env: { PYTHONPATH: root },
     ...(pythonPath ? { python: pythonPath } : {})
   };
 
@@ -152,17 +154,14 @@ async function startDebug(
   if (!ok) throw new Error("Failed to start debugging session.");
 }
 
-function renderStatusBar(
-  status: vscode.StatusBarItem,
-  last: LastRun | undefined
-): void {
+function renderStatusBar(status: vscode.StatusBarItem, last: LastRun | undefined): void {
   if (!last) {
     status.text = "$(play) uv: pick script";
     status.tooltip = "Pick a uv [project.scripts] entry and debug it";
     status.command = `${EXT_NS}.debugScript`;
   } else {
     status.text = `$(debug-alt) uv: ${last.scriptName}`;
-    status.tooltip = `Debug last: ${last.scriptName}\nArgs: ${last.argsLine || "(none)"}`;
+    status.tooltip = `Debug last: ${last.scriptName}\nArgs: ${last.argsLine || "(none)"}\n\nTip: Use 'UV: Debug Last Script (Edit Args)' to change args.`;
     status.command = `${EXT_NS}.debugLastScript`;
   }
   status.show();
@@ -177,17 +176,57 @@ async function setLastRun(
   renderStatusBar(status, last);
 }
 
+/**
+ * Script cache, refreshed on pyproject changes.
+ * This eliminates “restart to see new scripts”.
+ */
+function createScriptCache() {
+  let scripts: EntryPoint[] = [];
+  let lastError: string | null = null;
+  let refreshInFlight: Promise<void> | null = null;
+
+  const get = () => scripts;
+  const getError = () => lastError;
+
+  const refresh = async (workspaceFolder: string) => {
+    if (refreshInFlight) return refreshInFlight;
+    refreshInFlight = (async () => {
+      try {
+        scripts = await readUvScripts(workspaceFolder);
+        lastError = null;
+      } catch (e: any) {
+        lastError = e?.message ?? String(e);
+        scripts = [];
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+    return refreshInFlight;
+  };
+
+  return { get, getError, refresh };
+}
+
 async function pickAndDebug(
   context: vscode.ExtensionContext,
-  status: vscode.StatusBarItem
+  status: vscode.StatusBarItem,
+  cache: ReturnType<typeof createScriptCache>
 ): Promise<void> {
   const wf = getWorkspaceFolderOrThrow();
   const root = wf.uri.fsPath;
 
-  const scripts = await readUvScripts(root);
+  // Ensure cache is fresh at least once
+  if (cache.get().length === 0) {
+    await cache.refresh(root);
+  }
+
+  const scripts = cache.get();
   if (!scripts.length) {
+    const err = cache.getError();
     vscode.window.showWarningMessage(
-      "No [project.scripts] or [project.gui-scripts] found in pyproject.toml."
+      err
+        ? `No scripts found (or failed to parse pyproject.toml): ${err}`
+        : "No [project.scripts] or [project.gui-scripts] found in pyproject.toml."
     );
     return;
   }
@@ -213,28 +252,41 @@ async function pickAndDebug(
   });
 }
 
-async function debugLast(
+async function debugLastInternal(
   context: vscode.ExtensionContext,
-  status: vscode.StatusBarItem
+  status: vscode.StatusBarItem,
+  cache: ReturnType<typeof createScriptCache>,
+  mode: "fast" | "editArgs"
 ): Promise<void> {
   const wf = getWorkspaceFolderOrThrow();
   const root = wf.uri.fsPath;
 
   const last = context.workspaceState.get<LastRun>(LAST_RUN_KEY);
   if (!last) {
-    // Button behavior: if no last, act like “pick”
-    await pickAndDebug(context, status);
+    // If no last, behave like pick
+    await pickAndDebug(context, status, cache);
     return;
   }
 
-  const scripts = await readUvScripts(root);
+  // Keep cache refreshed
+  await cache.refresh(root);
+
+  const scripts = cache.get();
   const ep = scripts.find((s) => s.name === last.scriptName && s.target === last.target);
 
   if (!ep) {
     vscode.window.showWarningMessage(
       `Last script not found in pyproject.toml: ${last.scriptName} = ${last.target}`
     );
-    await pickAndDebug(context, status);
+    await pickAndDebug(context, status, cache);
+    return;
+  }
+
+  // Micro-update #1: zero-arg fast mode
+  if (mode === "fast" && (last.argsLine ?? "").trim() === "") {
+    await startDebug(wf, ep, "");
+    // Keep last run as-is (still empty)
+    renderStatusBar(status, last);
     return;
   }
 
@@ -254,24 +306,39 @@ async function debugLast(
 }
 
 export function activate(context: vscode.ExtensionContext) {
-  const status = vscode.window.createStatusBarItem(
-    vscode.StatusBarAlignment.Left,
-    100
-  );
+  const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   context.subscriptions.push(status);
+
+  const cache = createScriptCache();
 
   // Initialize status bar immediately
   const last = context.workspaceState.get<LastRun>(LAST_RUN_KEY);
   renderStatusBar(status, last);
 
-  // Optional nicety: if pyproject changes, keep status bar visible and sane
+  const wf = vscode.workspace.workspaceFolders?.[0];
+  const root = wf?.uri.fsPath;
+
+  // Micro-update #2: Auto-refresh scripts on pyproject changes
   const pyprojectWatcher = vscode.workspace.createFileSystemWatcher("**/pyproject.toml");
   context.subscriptions.push(pyprojectWatcher);
 
-  const refresh = () => {
-    const l = context.workspaceState.get<LastRun>(LAST_RUN_KEY);
-    renderStatusBar(status, l);
+  const refresh = async () => {
+    try {
+      const r = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (r) await cache.refresh(r);
+    } catch {
+      // swallow; picker will show error when used
+    } finally {
+      const l = context.workspaceState.get<LastRun>(LAST_RUN_KEY);
+      renderStatusBar(status, l);
+    }
   };
+
+  // Prime cache once if we can
+  if (root) {
+    refresh().catch(() => {});
+  }
+
   pyprojectWatcher.onDidChange(refresh, null, context.subscriptions);
   pyprojectWatcher.onDidCreate(refresh, null, context.subscriptions);
   pyprojectWatcher.onDidDelete(refresh, null, context.subscriptions);
@@ -279,17 +346,29 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand(`${EXT_NS}.debugScript`, async () => {
       try {
-        await pickAndDebug(context, status);
+        await pickAndDebug(context, status, cache);
       } catch (e: any) {
         vscode.window.showErrorMessage(e?.message ?? String(e));
       }
     })
   );
 
+  // Status bar click uses FAST mode: if last args are empty, run immediately.
   context.subscriptions.push(
     vscode.commands.registerCommand(`${EXT_NS}.debugLastScript`, async () => {
       try {
-        await debugLast(context, status);
+        await debugLastInternal(context, status, cache, "fast");
+      } catch (e: any) {
+        vscode.window.showErrorMessage(e?.message ?? String(e));
+      }
+    })
+  );
+
+  // Explicit command to always edit args
+  context.subscriptions.push(
+    vscode.commands.registerCommand(`${EXT_NS}.debugLastScriptEditArgs`, async () => {
+      try {
+        await debugLastInternal(context, status, cache, "editArgs");
       } catch (e: any) {
         vscode.window.showErrorMessage(e?.message ?? String(e));
       }
