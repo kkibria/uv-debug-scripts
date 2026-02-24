@@ -1,0 +1,54 @@
+{
+  "name": "uv-debug-scripts",
+  "displayName": "UV Debug Scripts",
+  "description": "Debug uv [project.scripts] entry points from pyproject.toml with zero launch.json friction.",
+  "version": "0.0.1",
+  "publisher": "you",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Debuggers",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "workspaceContains:pyproject.toml",
+    "onCommand:uvDebugScripts.debugScript",
+    "onCommand:uvDebugScripts.debugLastScript"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "uvDebugScripts.debugScript",
+        "title": "UV: Debug Script"
+      },
+      {
+        "command": "uvDebugScripts.debugLastScript",
+        "title": "UV: Debug Last Script"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "uvDebugScripts.debugLastScript",
+        "key": "ctrl+shift+enter",
+        "mac": "cmd+shift+enter",
+        "when": "editorTextFocus"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -w -p .",
+    "package": "npx @vscode/vsce package"
+  },
+  "dependencies": {
+    "@iarna/toml": "^2.2.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.4.0"
+  }
+}
