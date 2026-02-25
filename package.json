@@ -2,8 +2,9 @@
   "name": "uv-debug-scripts",
   "displayName": "UV Debug Scripts",
   "description": "Debug uv [project.scripts] entry points from pyproject.toml with zero launch.json friction.",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "you",
+  "icon": "icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
