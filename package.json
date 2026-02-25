@@ -2,7 +2,7 @@
   "name": "uv-debug-scripts",
   "displayName": "UV Debug Scripts",
   "description": "Debug uv [project.scripts] entry points from pyproject.toml with zero launch.json friction.",
-  "version": "0.0.2",
+  "version": "0.0.4",
   "publisher": "you",
   "engines": {
     "vscode": "^1.85.0"
@@ -17,13 +17,24 @@
     "Programming Languages"
   ],
   "activationEvents": [
-    "workspaceContains:pyproject.toml"
-    
-    
-    
+    "workspaceContains:pyproject.toml",
+    "onCommand:uvDebugScripts.debugScript",
+    "onCommand:uvDebugScripts.debugLastScript",
+    "onCommand:uvDebugScripts.debugLastScriptEditArgs",
+    "onCommand:uvDebugScripts.toggleHideUninitializedProjects"
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "UV Debug Scripts",
+      "properties": {
+        "uvDebugScripts.hideUninitializedProjects": {
+          "type": "boolean",
+          "default": false,
+          "description": "Hide workspace folders that have pyproject.toml but no .venv."
+        }
+      }
+    },
     "commands": [
       {
         "command": "uvDebugScripts.debugScript",
@@ -58,9 +69,9 @@
     ]
   },
   "scripts": {
-    "compile": "tsc -p .",
-    "watch": "tsc -w -p .",
-    "package": "npx @vscode/vsce package"
+    "compile": "tsc -p . --noEmit",
+    "build": "node ./esbuild.mjs",
+    "package": "npm run build && npx @vscode/vsce package"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5"
@@ -69,6 +80,7 @@
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.27.3",
     "typescript": "^5.4.0"
   }
 }
