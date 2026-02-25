@@ -1,3 +1,5 @@
+![project Icon](icon.png)
+
 # UV Debug Scripts
 
 Debug `uv` `[project.scripts]` entry points from `pyproject.toml` in VS Code without writing `launch.json`.
@@ -22,6 +24,16 @@ This extension detects `uv` projects and lets you launch any script entry point 
 - Python extension installed
 - `uv` project with `pyproject.toml`
 - Optional but recommended: `.venv` created via `uv sync`
+
+# Install 
+Download **UV Debug Scripts** extension in a folder. From VScode terminal, change directory to the folder.
+
+Type to install the VSCode extension,
+```bash
+code --install-extension uv-debug-scripts-0.0.5.vsix
+```
+
+Check if the extension is installed in VScode from the sidebar.
 
 ## How It Works
 
