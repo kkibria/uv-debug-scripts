@@ -17,7 +17,17 @@ type LastRun = {
 };
 
 const EXT_NS = "uvDebugScripts";
-const LAST_RUN_KEY = "lastRun";
+const LAST_RUN_KEY_PREFIX = "lastRun:";
+const LAST_WF_KEY = "lastWorkspaceFolder";
+
+function wfId(wf: vscode.WorkspaceFolder): string {
+  return wf.uri.toString();
+}
+
+function wfFromId(id: string | undefined): vscode.WorkspaceFolder | undefined {
+  if (!id) return undefined;
+  return (vscode.workspace.workspaceFolders ?? []).find((w) => wfId(w) === id);
+}
 
 function splitEntryPoint(target: string): { module: string; func: string } | null {
   const idx = target.lastIndexOf(":");
@@ -33,6 +43,61 @@ async function fileExists(p: string): Promise<boolean> {
     return false;
   }
 }
+
+async function pickWorkspaceFolder(): Promise<vscode.WorkspaceFolder | undefined> {
+  const wfs = vscode.workspace.workspaceFolders ?? [];
+  if (wfs.length === 0) {
+    vscode.window.showErrorMessage("Open a folder/workspace first.");
+    return undefined;
+  }
+  if (wfs.length === 1) return wfs[0];
+
+  const picked = await vscode.window.showQuickPick(
+    wfs.map((wf) => ({
+      label: wf.name,
+      description: wf.uri.fsPath,
+      wf
+    })),
+    { title: "UV: Which project?" }
+  );
+  return picked?.wf;
+}
+
+function workspaceKey(wf: vscode.WorkspaceFolder): string {
+  return wf.uri.toString();
+}
+
+async function pickWorkspaceFolderWithDefault(
+  context: vscode.ExtensionContext,
+  forcePick: boolean
+): Promise<vscode.WorkspaceFolder | undefined> {
+  const wfs = vscode.workspace.workspaceFolders ?? [];
+  if (wfs.length === 0) {
+    vscode.window.showErrorMessage("Open a folder/workspace first.");
+    return undefined;
+  }
+  if (wfs.length === 1) return wfs[0];
+
+  const lastId = context.workspaceState.get<string>(LAST_WF_KEY);
+  const last = wfFromId(lastId);
+
+  if (!forcePick && last) return last;
+
+  const picked = await vscode.window.showQuickPick(
+    wfs.map((wf) => ({
+      label: wf.name,
+      description: wf.uri.fsPath,
+      wf
+    })),
+    { title: "UV: Which project?" }
+  );
+
+  if (!picked) return undefined;
+
+  await context.workspaceState.update(LAST_WF_KEY, wfId(picked.wf));
+  return picked.wf;
+}
+
 
 function parseArgs(argLine: string): string[] {
   const out: string[] = [];
@@ -167,12 +232,30 @@ function renderStatusBar(status: vscode.StatusBarItem, last: LastRun | undefined
   status.show();
 }
 
+function renderModeStatus(modeStatus: vscode.StatusBarItem): void {
+  const cfg = vscode.workspace.getConfiguration(EXT_NS);
+  const hideUninit = cfg.get<boolean>("hideUninitializedProjects", false);
+
+  if (hideUninit) {
+    modeStatus.text = "$(filter) uv: hide uninit";
+    modeStatus.tooltip = "Uninitialized uv projects are hidden (no .venv). Click to show all.";
+  } else {
+    modeStatus.text = "$(list-unordered) uv: show all";
+    modeStatus.tooltip = "All uv projects are shown. Click to hide uninitialized.";
+  }
+
+  modeStatus.command = `${EXT_NS}.toggleHideUninitializedProjects`;
+  modeStatus.show();
+}
+
+
 async function setLastRun(
   context: vscode.ExtensionContext,
   status: vscode.StatusBarItem,
+  wf: vscode.WorkspaceFolder,
   last: LastRun
 ): Promise<void> {
-  await context.workspaceState.update(LAST_RUN_KEY, last);
+  await context.workspaceState.update(LAST_RUN_KEY_PREFIX + workspaceKey(wf), last);
   renderStatusBar(status, last);
 }
 
@@ -181,30 +264,50 @@ async function setLastRun(
  * This eliminates “restart to see new scripts”.
  */
 function createScriptCache() {
-  let scripts: EntryPoint[] = [];
-  let lastError: string | null = null;
-  let refreshInFlight: Promise<void> | null = null;
-
-  const get = () => scripts;
-  const getError = () => lastError;
-
-  const refresh = async (workspaceFolder: string) => {
-    if (refreshInFlight) return refreshInFlight;
-    refreshInFlight = (async () => {
-      try {
-        scripts = await readUvScripts(workspaceFolder);
-        lastError = null;
-      } catch (e: any) {
-        lastError = e?.message ?? String(e);
-        scripts = [];
-      } finally {
-        refreshInFlight = null;
-      }
-    })();
-    return refreshInFlight;
+  type CacheEntry = {
+    scripts: EntryPoint[];
+    lastError: string | null;
+    refreshInFlight: Promise<void> | null;
   };
 
-  return { get, getError, refresh };
+  const byWorkspace = new Map<string, CacheEntry>();
+
+  function ensure(key: string): CacheEntry {
+    const existing = byWorkspace.get(key);
+    if (existing) return existing;
+    const created: CacheEntry = { scripts: [], lastError: null, refreshInFlight: null };
+    byWorkspace.set(key, created);
+    return created;
+  }
+
+  const get = (workspaceFolder: string) => ensure(workspaceFolder).scripts;
+  const getError = (workspaceFolder: string) => ensure(workspaceFolder).lastError;
+
+  const refresh = async (workspaceFolder: string) => {
+    const entry = ensure(workspaceFolder);
+
+    if (entry.refreshInFlight) return entry.refreshInFlight;
+
+    entry.refreshInFlight = (async () => {
+      try {
+        entry.scripts = await readUvScripts(workspaceFolder);
+        entry.lastError = null;
+      } catch (e: any) {
+        entry.lastError = e?.message ?? String(e);
+        entry.scripts = [];
+      } finally {
+        entry.refreshInFlight = null;
+      }
+    })();
+
+    return entry.refreshInFlight;
+  };
+
+  const clear = (workspaceFolder: string) => {
+    byWorkspace.delete(workspaceFolder);
+  };
+
+  return { get, getError, refresh, clear };
 }
 
 async function pickAndDebug(
@@ -212,17 +315,18 @@ async function pickAndDebug(
   status: vscode.StatusBarItem,
   cache: ReturnType<typeof createScriptCache>
 ): Promise<void> {
-  const wf = getWorkspaceFolderOrThrow();
+  const wf = await pickWorkspaceFolderWithDefault(context, true);
+  if (!wf) return;
   const root = wf.uri.fsPath;
 
   // Ensure cache is fresh at least once
-  if (cache.get().length === 0) {
+  if (cache.get(root).length === 0) {
     await cache.refresh(root);
   }
 
-  const scripts = cache.get();
+  const scripts = cache.get(root);
   if (!scripts.length) {
-    const err = cache.getError();
+    const err = cache.getError(root);
     vscode.window.showWarningMessage(
       err
         ? `No scripts found (or failed to parse pyproject.toml): ${err}`
@@ -244,8 +348,10 @@ async function pickAndDebug(
   });
   if (argsLine === undefined) return;
 
+  await context.workspaceState.update(LAST_WF_KEY, wfId(wf));
   await startDebug(wf, picked.s, argsLine);
-  await setLastRun(context, status, {
+  await context.workspaceState.update(LAST_WF_KEY, wfId(wf));
+  await setLastRun(context, status, wf, {
     scriptName: picked.s.name,
     target: picked.s.target,
     argsLine
@@ -258,10 +364,11 @@ async function debugLastInternal(
   cache: ReturnType<typeof createScriptCache>,
   mode: "fast" | "editArgs"
 ): Promise<void> {
-  const wf = getWorkspaceFolderOrThrow();
+  const wf = await pickWorkspaceFolderWithDefault(context, false);
+  if (!wf) return;
   const root = wf.uri.fsPath;
 
-  const last = context.workspaceState.get<LastRun>(LAST_RUN_KEY);
+  const last = context.workspaceState.get<LastRun>(LAST_RUN_KEY_PREFIX + workspaceKey(wf));
   if (!last) {
     // If no last, behave like pick
     await pickAndDebug(context, status, cache);
@@ -271,7 +378,7 @@ async function debugLastInternal(
   // Keep cache refreshed
   await cache.refresh(root);
 
-  const scripts = cache.get();
+  const scripts = cache.get(root);
   const ep = scripts.find((s) => s.name === last.scriptName && s.target === last.target);
 
   if (!ep) {
@@ -298,7 +405,7 @@ async function debugLastInternal(
   if (argsLine === undefined) return;
 
   await startDebug(wf, ep, argsLine);
-  await setLastRun(context, status, {
+  await setLastRun(context, status, wf, {
     scriptName: ep.name,
     target: ep.target,
     argsLine
@@ -312,10 +419,26 @@ export function activate(context: vscode.ExtensionContext) {
   const cache = createScriptCache();
 
   // Initialize status bar immediately
-  const last = context.workspaceState.get<LastRun>(LAST_RUN_KEY);
+  const wf = vscode.workspace.workspaceFolders?.[0];
+  const last = wf
+    ? context.workspaceState.get<LastRun>(LAST_RUN_KEY_PREFIX + workspaceKey(wf))
+    : undefined;
   renderStatusBar(status, last);
 
-  const wf = vscode.workspace.workspaceFolders?.[0];
+  const modeStatus = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Left,
+    99 // just to the right of the main uv pill if main is 100
+  );
+  context.subscriptions.push(modeStatus);
+  renderModeStatus(modeStatus);
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration(`${EXT_NS}.hideUninitializedProjects`)) {
+        renderModeStatus(modeStatus);
+      }
+    })
+  );
+
   const root = wf?.uri.fsPath;
 
   // Micro-update #2: Auto-refresh scripts on pyproject changes
@@ -329,7 +452,10 @@ export function activate(context: vscode.ExtensionContext) {
     } catch {
       // swallow; picker will show error when used
     } finally {
-      const l = context.workspaceState.get<LastRun>(LAST_RUN_KEY);
+      const wf = vscode.workspace.workspaceFolders?.[0];
+      const l = wf
+        ? context.workspaceState.get<LastRun>(LAST_RUN_KEY_PREFIX + workspaceKey(wf))
+        : undefined;
       renderStatusBar(status, l);
     }
   };

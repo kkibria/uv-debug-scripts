@@ -2,7 +2,7 @@
   "name": "uv-debug-scripts",
   "displayName": "UV Debug Scripts",
   "description": "Debug uv [project.scripts] entry points from pyproject.toml with zero launch.json friction.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "you",
   "engines": {
     "vscode": "^1.85.0"
@@ -17,10 +17,10 @@
     "Programming Languages"
   ],
   "activationEvents": [
-    "workspaceContains:pyproject.toml",
-    "onCommand:uvDebugScripts.debugScript",
-    "onCommand:uvDebugScripts.debugLastScript",
-    "onCommand:uvDebugScripts.debugLastScriptEditArgs"
+    "workspaceContains:pyproject.toml"
+    
+    
+    
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -36,6 +36,10 @@
       {
         "command": "uvDebugScripts.debugLastScriptEditArgs",
         "title": "UV: Debug Last Script (Edit Args)"
+      },
+      {
+        "command": "uvDebugScripts.toggleHideUninitializedProjects",
+        "title": "UV: Toggle Hide Uninitialized Projects"
       }
     ],
     "keybindings": [
